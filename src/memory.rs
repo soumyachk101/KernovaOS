@@ -2,11 +2,27 @@
 //! plus a frame allocator over the BootInfo memory map.
 
 use bootloader::bootinfo::{MemoryMap, MemoryRegionType};
+use spin::Mutex;
 use x86_64::registers::control::Cr3;
 use x86_64::structures::paging::{
     FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PhysFrame, Size4KiB,
 };
 use x86_64::{PhysAddr, VirtAddr};
+
+/// Kernel-global mapper + frame allocator + phys offset, set once by
+/// `init_globals` from kernel_main. Later subsystems (user address spaces at
+/// M11) allocate frames through these instead of threading locals around.
+pub static MAPPER: Mutex<Option<OffsetPageTable<'static>>> = Mutex::new(None);
+pub static FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
+pub static PHYS_OFFSET: Mutex<Option<VirtAddr>> = Mutex::new(None);
+
+/// # Safety
+/// Same contracts as [`init`] + [`BootInfoFrameAllocator::init`]; call once.
+pub unsafe fn init_globals(physical_memory_offset: VirtAddr, memory_map: &'static MemoryMap) {
+    *MAPPER.lock() = Some(init(physical_memory_offset));
+    *FRAME_ALLOCATOR.lock() = Some(BootInfoFrameAllocator::init(memory_map));
+    *PHYS_OFFSET.lock() = Some(physical_memory_offset);
+}
 
 /// Initialize an OffsetPageTable for the active level-4 table.
 ///

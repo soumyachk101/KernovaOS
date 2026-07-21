@@ -23,25 +23,44 @@ lazy_static! {
             // stack grows downward: pass the top (exclusive end)
             stack_start + STACK_SIZE as u64
         };
+        // ring-0 stack the CPU switches to on any ring-3 → ring-0 transition
+        // (int 0x80, IRQs and faults raised while in user mode)
+        tss.privilege_stack_table[0] = {
+            const STACK_SIZE: usize = 4096 * 5;
+            static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+
+            // SAFETY: address-of only, same argument as the IST stack above;
+            // only one user program runs at a time (usermode.rs), so this
+            // stack is never in use by two transitions at once.
+            let stack_start = VirtAddr::from_ptr(&raw const STACK);
+            stack_start + STACK_SIZE as u64
+        };
         tss
     };
 }
 
-struct Selectors {
+pub struct Selectors {
     code_selector: SegmentSelector,
     tss_selector: SegmentSelector,
+    pub user_code_selector: SegmentSelector,
+    pub user_data_selector: SegmentSelector,
 }
 
 lazy_static! {
-    static ref GDT: (GlobalDescriptorTable, Selectors) = {
+    pub static ref GDT: (GlobalDescriptorTable, Selectors) = {
         let mut gdt = GlobalDescriptorTable::new();
         let code_selector = gdt.append(Descriptor::kernel_code_segment());
         let tss_selector = gdt.append(Descriptor::tss_segment(&TSS));
+        // DPL-3 segments; append returns selectors with RPL already = 3
+        let user_data_selector = gdt.append(Descriptor::user_data_segment());
+        let user_code_selector = gdt.append(Descriptor::user_code_segment());
         (
             gdt,
             Selectors {
                 code_selector,
                 tss_selector,
+                user_code_selector,
+                user_data_selector,
             },
         )
     };

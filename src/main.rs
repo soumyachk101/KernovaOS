@@ -14,7 +14,7 @@ use kernova::task::{executor::Executor, keyboard, Task};
 entry_point!(kernel_main);
 
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
-    use kernova::memory::{self, BootInfoFrameAllocator};
+    use kernova::memory;
     use x86_64::VirtAddr;
 
     println!("Kernova: a kernel born like a new star");
@@ -24,17 +24,31 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
     // SAFETY: bootloader maps all physical memory at physical_memory_offset;
     // called exactly once.
-    let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    // SAFETY: memory map comes straight from the bootloader.
-    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
-
-    kernova::allocator::init_heap(&mut mapper, &mut frame_allocator)
+    unsafe { memory::init_globals(phys_mem_offset, &boot_info.memory_map) };
+    {
+        let mut mapper = memory::MAPPER.lock();
+        let mut frame_allocator = memory::FRAME_ALLOCATOR.lock();
+        kernova::allocator::init_heap(
+            mapper.as_mut().unwrap(),
+            frame_allocator.as_mut().unwrap(),
+        )
         .expect("heap initialization failed");
+    }
 
     #[cfg(test)]
     test_main();
 
     println!("It did not crash!");
+
+    // ring 3 demos (M11): a well-behaved program, a wild pointer, and a
+    // privileged instruction — the kernel must survive all three
+    use kernova::usermode::{self, programs};
+    let code = usermode::run(programs::hello());
+    println!("user program exited with code {}", code);
+    let code = usermode::run(programs::fault());
+    println!("faulting user program reported code {}", code);
+    let code = usermode::run(programs::privileged());
+    println!("privileged user program reported code {}", code);
 
     // preemptive threads (M10): two CPU-bound loops with no yields, plus a
     // short-lived thread proving the exit path

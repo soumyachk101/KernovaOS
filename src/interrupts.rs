@@ -42,10 +42,47 @@ lazy_static! {
                 .set_handler_fn(double_fault_handler)
                 .set_stack_index(crate::gdt::DOUBLE_FAULT_IST_INDEX);
         }
+        idt.general_protection_fault
+            .set_handler_fn(general_protection_fault_handler);
         idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
+        // SAFETY: syscall_entry is a naked handler that preserves the full
+        // register state and ends in iretq; DPL 3 lets ring-3 code invoke it.
+        unsafe {
+            idt[0x80]
+                .set_handler_addr(x86_64::VirtAddr::new(
+                    crate::usermode::syscall::syscall_entry as usize as u64,
+                ))
+                .set_privilege_level(x86_64::PrivilegeLevel::Ring3);
+        }
         idt
     };
+}
+
+/// A fault raised from ring 3 kills the user program, not the kernel.
+/// Returns only if the fault did NOT come from user mode.
+fn kill_user_if_ring3(stack_frame: &InterruptStackFrame, what: &str) {
+    use x86_64::PrivilegeLevel;
+
+    if stack_frame.code_segment.rpl() == PrivilegeLevel::Ring3 {
+        println!(
+            "user program killed: {} at {:?}",
+            what, stack_frame.instruction_pointer
+        );
+        crate::usermode::set_exit_code(139); // 128 + SIGSEGV, unix-flavored
+        crate::usermode::return_to_kernel();
+    }
+}
+
+extern "x86-interrupt" fn general_protection_fault_handler(
+    stack_frame: InterruptStackFrame,
+    error_code: u64,
+) {
+    kill_user_if_ring3(&stack_frame, "general protection fault");
+    panic!(
+        "EXCEPTION: GENERAL PROTECTION FAULT (error code {})\n{:#?}",
+        error_code, stack_frame
+    );
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
@@ -102,6 +139,8 @@ extern "x86-interrupt" fn page_fault_handler(
     error_code: PageFaultErrorCode,
 ) {
     use x86_64::registers::control::Cr2;
+
+    kill_user_if_ring3(&stack_frame, "page fault");
 
     println!("EXCEPTION: PAGE FAULT");
     println!("Accessed Address: {:?}", Cr2::read());

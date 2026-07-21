@@ -14,6 +14,7 @@ pub mod memory;
 pub mod sched;
 pub mod serial;
 pub mod task;
+pub mod usermode;
 pub mod vga_buffer;
 
 use core::panic::PanicInfo;
