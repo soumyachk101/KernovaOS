@@ -22,6 +22,16 @@ global_asm!(
     "2:  .ascii \"hello from ring 3 via sys_write\\n\"",  // 32 bytes",
     "3:",
     "user_prog_hello_end:",
+    // --- getpid: sys_getpid, exit with the pid ------------------------
+    ".global user_prog_getpid_start",
+    ".global user_prog_getpid_end",
+    "user_prog_getpid_start:",
+    "    mov rax, 3",                       // SYS_GETPID
+    "    int 0x80",
+    "    mov rdi, rax",                      // exit code = pid
+    "    mov rax, 2",                        // SYS_EXIT
+    "    int 0x80",
+    "user_prog_getpid_end:",
     // --- fault: dereference a garbage pointer -------------------------
     ".global user_prog_fault_start",
     ".global user_prog_fault_end",
@@ -45,6 +55,8 @@ global_asm!(
 extern "C" {
     static user_prog_hello_start: u8;
     static user_prog_hello_end: u8;
+    static user_prog_getpid_start: u8;
+    static user_prog_getpid_end: u8;
     static user_prog_fault_start: u8;
     static user_prog_fault_end: u8;
     static user_prog_priv_start: u8;
@@ -60,6 +72,22 @@ fn blob(start: *const u8, end: *const u8) -> &'static [u8] {
 pub fn hello() -> &'static [u8] {
     // SAFETY: symbols defined in the global_asm block above.
     unsafe { blob(&raw const user_prog_hello_start, &raw const user_prog_hello_end) }
+}
+
+pub fn getpid() -> &'static [u8] {
+    // SAFETY: as above.
+    unsafe { blob(&raw const user_prog_getpid_start, &raw const user_prog_getpid_end) }
+}
+
+/// Look up a runnable program by name (used by the shell's `run` builtin).
+pub fn by_name(name: &str) -> Option<&'static [u8]> {
+    match name {
+        "hello" => Some(hello()),
+        "getpid" => Some(getpid()),
+        "fault" => Some(fault()),
+        "priv" => Some(privileged()),
+        _ => None,
+    }
 }
 
 pub fn fault() -> &'static [u8] {

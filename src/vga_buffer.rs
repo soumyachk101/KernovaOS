@@ -110,6 +110,38 @@ impl Writer {
             self.buffer.chars[row][col].write(blank);
         }
     }
+
+    /// Erase the last character on the current (bottom) line. No-op at column 0.
+    fn backspace(&mut self) {
+        if self.column_position == 0 {
+            return;
+        }
+        self.column_position -= 1;
+        let row = BUFFER_HEIGHT - 1;
+        self.buffer.chars[row][self.column_position].write(ScreenChar {
+            ascii_character: b' ',
+            color_code: self.color_code,
+        });
+    }
+
+    fn clear_all(&mut self) {
+        for row in 0..BUFFER_HEIGHT {
+            self.clear_row(row);
+        }
+        self.column_position = 0;
+    }
+}
+
+/// Erase the last typed character from the screen (used by shell line editing).
+pub fn backspace() {
+    use x86_64::instructions::interrupts;
+    interrupts::without_interrupts(|| WRITER.lock().backspace());
+}
+
+/// Clear the whole screen and home the cursor.
+pub fn clear_screen() {
+    use x86_64::instructions::interrupts;
+    interrupts::without_interrupts(|| WRITER.lock().clear_all());
 }
 
 impl fmt::Write for Writer {
