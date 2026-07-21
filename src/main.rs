@@ -9,6 +9,7 @@ extern crate alloc;
 use bootloader::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use kernova::println;
+use kernova::task::{executor::Executor, keyboard, Task};
 
 entry_point!(kernel_main);
 
@@ -60,7 +61,31 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     test_main();
 
     println!("It did not crash!");
-    kernova::hlt_loop();
+
+    let mut executor = Executor::new();
+    executor.spawn(Task::new(example_task()));
+    executor.spawn(Task::new(interleave_task("A")));
+    executor.spawn(Task::new(interleave_task("B")));
+    executor.spawn(Task::new(keyboard::print_keypresses()));
+    executor.run();
+}
+
+async fn async_number() -> u32 {
+    42
+}
+
+async fn example_task() {
+    let number = async_number().await;
+    println!("async number: {}", number);
+}
+
+/// Prints five numbered lines, yielding between each — run two of these and
+/// the outputs interleave, proving cooperative scheduling.
+async fn interleave_task(name: &'static str) {
+    for i in 0..5 {
+        println!("task {} step {}", name, i);
+        kernova::task::yield_now().await;
+    }
 }
 
 /// Prints the panic message + location to the VGA buffer, then halts.
