@@ -1,4 +1,5 @@
 [unstable]
+json-target-spec = true                         # custom target JSON needs opt-in on recent nightlies
 build-std = ["core", "compiler_builtins"]       # add "alloc" at M8
 build-std-features = ["compiler-builtins-mem"]
 
