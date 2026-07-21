@@ -8,7 +8,7 @@ extern crate alloc;
 
 use bootloader::{entry_point, BootInfo};
 use core::panic::PanicInfo;
-use kernova::println;
+use kernova::{print, println};
 use kernova::task::{executor::Executor, keyboard, Task};
 
 entry_point!(kernel_main);
@@ -39,6 +39,20 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     test_main();
 
     println!("It did not crash!");
+
+    // initrd demo (M12): kernel-side ls + cat over the ustar VFS
+    {
+        use kernova::fs::{Initrd, Vfs};
+        let fs = Initrd::new();
+        print!("initrd ls:");
+        for name in fs.list() {
+            print!(" {}", name);
+        }
+        println!();
+        if let Some(data) = fs.read("motd.txt") {
+            print!("cat motd.txt: {}", core::str::from_utf8(data).unwrap_or("<binary>"));
+        }
+    }
 
     // ring 3 demos (M11): a well-behaved program, a wild pointer, and a
     // privileged instruction — the kernel must survive all three
