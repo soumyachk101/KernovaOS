@@ -1,0 +1,13 @@
+# Ignore all markdown files
+*.md
+**/*.md
+
+# Exception for README files
+!README.md
+!readme.md
+!**/README.md
+!**/readme.md
+
+# Build & OS artifacts
+/target
+.DS_Store
