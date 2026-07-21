@@ -16,6 +16,11 @@ use core::panic::PanicInfo;
 pub fn init() {
     gdt::init();
     interrupts::init_idt();
+    // SAFETY: offsets 32/40 are set in interrupts.rs and the IDT entries for
+    // them are installed above; initializing before sti means no IRQ can
+    // arrive unhandled.
+    unsafe { interrupts::PICS.lock().initialize() };
+    x86_64::instructions::interrupts::enable();
 }
 
 /// Halt until the next interrupt, forever — the idle loop.
