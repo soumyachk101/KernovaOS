@@ -1,7 +1,7 @@
 [unstable]
 json-target-spec = true                         # custom target JSON needs opt-in on recent nightlies
 panic-abort-tests = true                        # test units use panic=abort too — else build-std builds core twice (cargo #7359)
-build-std = ["core", "compiler_builtins"]       # add "alloc" at M8
+build-std = ["core", "compiler_builtins", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
 
 [build]

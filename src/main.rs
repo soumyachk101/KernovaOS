@@ -4,6 +4,8 @@
 #![test_runner(kernova::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
+extern crate alloc;
+
 use bootloader::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use kernova::println;
@@ -12,7 +14,7 @@ entry_point!(kernel_main);
 
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
     use kernova::memory::{self, BootInfoFrameAllocator};
-    use x86_64::structures::paging::{Page, Translate};
+    use x86_64::structures::paging::Translate;
     use x86_64::VirtAddr;
 
     println!("Kernova: a kernel born like a new star");
@@ -38,13 +40,21 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
         println!("{:?} -> {:?}", virt, phys);
     }
 
-    // map an unused page to the VGA frame and write through it
-    let page = Page::containing_address(VirtAddr::new(0));
-    memory::create_example_mapping(page, &mut mapper, &mut frame_allocator);
-    let page_ptr: *mut u64 = page.start_address().as_mut_ptr();
-    // SAFETY: `page` was just mapped to the VGA frame; offset 400 is row 5,
-    // column 0 — inside the 80×25 buffer. Volatile write, no reference kept.
-    unsafe { page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e) }; // "New!"
+    kernova::allocator::init_heap(&mut mapper, &mut frame_allocator)
+        .expect("heap initialization failed");
+
+    // heap smoke test: Box, Vec, String, Rc
+    {
+        use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
+        let boxed = Box::new(41);
+        let mut v = Vec::new();
+        for i in 0..500 {
+            v.push(i);
+        }
+        let s = String::from("heap works");
+        let rc = Rc::new(*boxed + 1);
+        println!("{}: box+1={} vec_sum={} rc_count={}", s, rc, v.iter().sum::<i32>(), Rc::strong_count(&rc));
+    }
 
     #[cfg(test)]
     test_main();
