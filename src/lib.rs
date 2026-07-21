@@ -7,6 +7,7 @@
 
 pub mod gdt;
 pub mod interrupts;
+pub mod memory;
 pub mod serial;
 pub mod vga_buffer;
 
@@ -82,8 +83,10 @@ pub fn exit_qemu(exit_code: QemuExitCode) {
 
 /// Entry point for `cargo test --lib`.
 #[cfg(test)]
-#[no_mangle]
-pub extern "C" fn _start() -> ! {
+bootloader::entry_point!(test_kernel_main);
+
+#[cfg(test)]
+fn test_kernel_main(_boot_info: &'static bootloader::BootInfo) -> ! {
     init();
     test_main();
     hlt_loop();
