@@ -11,10 +11,13 @@ use kernova::println;
 pub extern "C" fn _start() -> ! {
     println!("Kernova: a kernel born like a new star");
 
+    kernova::init();
+
     #[cfg(test)]
     test_main();
 
-    loop {}
+    println!("It did not crash!");
+    kernova::hlt_loop();
 }
 
 /// Prints the panic message + location to the VGA buffer, then spins.
