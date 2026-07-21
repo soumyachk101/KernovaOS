@@ -1,0 +1,3 @@
+[toolchain]
+channel = "nightly"        # once the build is green, pin an exact date: "nightly-YYYY-MM-DD"
+components = ["rust-src", "llvm-tools-preview"]

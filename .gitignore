@@ -11,3 +11,4 @@
 # Build & OS artifacts
 /target
 .DS_Store
+.serena/
