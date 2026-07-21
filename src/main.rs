@@ -15,7 +15,6 @@ entry_point!(kernel_main);
 
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
     use kernova::memory::{self, BootInfoFrameAllocator};
-    use x86_64::structures::paging::Translate;
     use x86_64::VirtAddr;
 
     println!("Kernova: a kernel born like a new star");
@@ -29,45 +28,57 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // SAFETY: memory map comes straight from the bootloader.
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
 
-    // translation demo: VGA, a kernel code addr, the physical mapping base
-    let addresses = [
-        0xb8000,
-        0x201008,
-        boot_info.physical_memory_offset,
-    ];
-    for &address in &addresses {
-        let virt = VirtAddr::new(address);
-        let phys = mapper.translate_addr(virt);
-        println!("{:?} -> {:?}", virt, phys);
-    }
-
     kernova::allocator::init_heap(&mut mapper, &mut frame_allocator)
         .expect("heap initialization failed");
-
-    // heap smoke test: Box, Vec, String, Rc
-    {
-        use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-        let boxed = Box::new(41);
-        let mut v = Vec::new();
-        for i in 0..500 {
-            v.push(i);
-        }
-        let s = String::from("heap works");
-        let rc = Rc::new(*boxed + 1);
-        println!("{}: box+1={} vec_sum={} rc_count={}", s, rc, v.iter().sum::<i32>(), Rc::strong_count(&rc));
-    }
 
     #[cfg(test)]
     test_main();
 
     println!("It did not crash!");
 
+    // preemptive threads (M10): two CPU-bound loops with no yields, plus a
+    // short-lived thread proving the exit path
+    kernova::sched::init();
+    kernova::sched::spawn(cpu_bound_one);
+    kernova::sched::spawn(cpu_bound_two);
+    kernova::sched::spawn(short_lived);
+
+    // the async executor runs as thread 0 among the others (ADR-006)
     let mut executor = Executor::new();
     executor.spawn(Task::new(example_task()));
     executor.spawn(Task::new(interleave_task("A")));
     executor.spawn(Task::new(interleave_task("B")));
     executor.spawn(Task::new(keyboard::print_keypresses()));
     executor.run();
+}
+
+fn busy_work(units: u64) {
+    for i in 0..units * 100_000 {
+        core::hint::black_box(i); // keep the loop from being optimized away
+    }
+}
+
+extern "C" fn cpu_bound_one() {
+    let mut n = 0u64;
+    loop {
+        busy_work(5);
+        n += 1;
+        println!("thread ONE tick {}", n);
+    }
+}
+
+extern "C" fn cpu_bound_two() {
+    let mut n = 0u64;
+    loop {
+        busy_work(5);
+        n += 1;
+        println!("thread TWO tick {}", n);
+    }
+}
+
+extern "C" fn short_lived() {
+    println!("short-lived thread ran and exits");
+    // returning drops into thread_exit via the trampoline
 }
 
 async fn async_number() -> u32 {

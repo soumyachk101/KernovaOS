@@ -52,11 +52,17 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     TICKS.fetch_add(1, Ordering::Relaxed);
 
     // SAFETY: EOI for the timer IRQ we are currently servicing; required or
-    // the PIC never delivers another interrupt.
+    // the PIC never delivers another interrupt. Sent BEFORE preempting so the
+    // PIC can deliver the next tick to whichever thread runs next.
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
     }
+
+    // Preemption point: switches stacks and returns here later; the iretq at
+    // the end of this handler then resumes the interrupted thread
+    // (ARCHITECTURE §6 — resched on the interrupt-return path).
+    crate::sched::preempt();
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
