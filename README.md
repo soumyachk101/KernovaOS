@@ -28,6 +28,34 @@ each a single tagged commit that must **boot and pass tests before the next begi
 It is a learning kernel: QEMU only, single core, x86-64 long mode, no real-hardware code paths.
 Primary references are *Writing an OS in Rust* (os.phil-opp.com), the OSDev Wiki, and OSTEP.
 
+<details>
+<summary><strong>🔰 New to kernels? Read this 60-second primer first</strong></summary>
+
+<br/>
+
+A **kernel** is the lowest layer of software — it runs directly on the CPU with nothing
+underneath it. No operating system to call, no libraries, no `println`. If you want to put a
+character on the screen, *you* write to video memory. If a key is pressed, *you* handle the
+hardware interrupt. Kernova builds every one of those pieces by hand, in order:
+
+- **Freestanding binary** — Rust with no standard library (`no_std`). You get `core` and
+  nothing else; even `main` doesn't exist until you make it.
+- **Interrupts** — the CPU stops your code to say "a key was pressed" / "the timer ticked".
+  You register handlers in a table (the IDT) so the CPU knows where to jump.
+- **Paging** — the MMU translates *virtual* addresses your code uses into *physical* RAM
+  addresses. You control the page tables, so you decide what memory exists and who can touch it.
+- **Heap** — once paging works you can hand out memory, so `Box`/`Vec`/`String` finally work.
+- **Multitasking** — running more than one thing: cooperatively (tasks that yield) and
+  preemptively (the timer forcibly switches between threads).
+- **User mode (ring 3)** — untrusted programs run with reduced privilege. They can't touch
+  kernel memory or hardware directly; they ask the kernel via **syscalls**. If they misbehave,
+  the kernel kills *them*, not itself.
+- **Filesystem + shell** — read files from an embedded archive, and type commands to run it all.
+
+Every milestone below adds exactly one of these layers and proves it boots in QEMU before moving on.
+
+</details>
+
 ```text
 BIOS ─▶ bootloader crate ─▶ long mode + paging ─▶ kernel_main
                                                       │
@@ -54,6 +82,31 @@ BIOS ─▶ bootloader crate ─▶ long mode + paging ─▶ kernel_main
 | **User mode** | ring 3 via `iretq`, `int 0x80` syscalls (`read`/`write`/`exit`/`getpid`), per-process PML4, fault isolation | M11 |
 | **Filesystem** | read-only ustar initrd packed at build time, VFS `read`/`list` | M12 |
 | **Shell** | async task, backspace line editing, builtins + `run <prog>` | M13 |
+
+<details>
+<summary><strong>📖 Concept glossary</strong> — click for plain-language definitions</summary>
+
+<br/>
+
+| Term | In plain words |
+|---|---|
+| `no_std` | Rust without the standard library — no OS to lean on. You only get `core`. |
+| **bootloader** | Code that runs first, sets up the CPU (long mode, paging), and jumps to your kernel. |
+| **IDT** | Interrupt Descriptor Table — a lookup table: "for interrupt N, run this function." |
+| **GDT / TSS** | Segment + task tables the CPU requires; here they mainly hold the special crash-safe stack and user-mode segments. |
+| **IRQ** | A hardware interrupt (timer = IRQ0, keyboard = IRQ1). |
+| **PIC** | The chip that routes IRQs to the CPU; we remap it so its numbers don't collide with CPU exceptions. |
+| **Paging / MMU** | Hardware that maps virtual addresses → physical RAM in 4 KiB pages. |
+| **frame** | One 4 KiB chunk of physical RAM. |
+| **page fault** | The CPU trap when code touches an unmapped/forbidden address. |
+| **double fault** | A fault *while handling a fault* — must be caught or the machine resets (triple fault). |
+| **ring 3** | Least-privileged CPU mode; where user programs run. Ring 0 = kernel. |
+| **syscall** | The controlled doorway a ring-3 program uses to ask the kernel for something. |
+| **initrd** | A small filesystem image baked into the kernel at build time. |
+| **ustar** | The classic `tar` archive format — our initrd's on-disk layout. |
+| **QEMU** | The emulator we run the whole kernel inside — no real hardware, ever. |
+
+</details>
 
 ---
 
@@ -203,6 +256,28 @@ Number in `rax`, args in `rdi`/`rsi`/`rdx`, return in `rax`.
 A user program that dereferences garbage or runs a privileged instruction is **killed** (exit
 139); the kernel logs it and keeps running.
 
+### Under the hood: what happens when you type `run hello`
+
+```mermaid
+flowchart TD
+    A["you type: run hello ⏎"] --> B[shell tokenizes the line]
+    B --> C["look up 'hello' → ring-3 machine-code blob"]
+    C --> D["build a fresh address space<br/>(new PML4, kernel half shared,<br/>user code + stack mapped USER_ACCESSIBLE)"]
+    D --> E["craft an iretq frame<br/>(user RIP, CS/SS with ring 3, RFLAGS)"]
+    E --> F["iretq → CPU drops to ring 3 🔽"]
+    F --> G["user code runs:<br/>mov rax,1 (write) … int 0x80"]
+    G --> H["int 0x80 → CPU jumps to kernel<br/>on the TSS ring-0 stack 🔼"]
+    H --> I["dispatcher validates the user pointer,<br/>prints the message, returns to ring 3"]
+    I --> J["user calls exit(42) → int 0x80"]
+    J --> K["kernel restores its saved context,<br/>switches back to the kernel address space"]
+    K --> L["shell prints: [hello exited with code 42]"]
+```
+
+This one command exercises **almost every subsystem**: the shell (M13), the initrd/blob lookup,
+paging (M7) to build the address space, the GDT/TSS (M5/M11) for the privilege switch, the IDT
+(M4) for `int 0x80`, and pointer validation (M11). If the program faulted instead, the exception
+handlers (M4) would catch it and kill just the program.
+
 ---
 
 ## More from the build
@@ -248,6 +323,22 @@ initrd/            files packed into the ustar initrd
 build.rs           packs initrd/ → ustar at build time
 docs/              PRD, TRD, ARCHITECTURE, MILESTONES, DECISIONS (ADRs), …
 ```
+
+## Reading the code — a suggested order
+
+New to the codebase? Follow the milestone order — each file adds one concept on top of the last:
+
+1. **`src/main.rs`** — `kernel_main`: the whole boot story in ~40 lines. Start here.
+2. **`src/vga_buffer.rs`** / **`src/serial.rs`** — how output works before anything else does.
+3. **`src/interrupts.rs`** — the IDT and every handler (exceptions + timer + keyboard + `int 0x80`).
+4. **`src/gdt.rs`** — the crash-safe stack and the user-mode segments.
+5. **`src/memory.rs`** / **`src/allocator.rs`** — paging, frames, and the heap.
+6. **`src/task/`** — the async executor and the keyboard-to-task pipeline.
+7. **`src/usermode/`** — dropping to ring 3, the syscall dispatcher, and fault isolation.
+8. **`src/fs/`** + **`src/shell.rs`** — the initrd parser and the shell that ties it together.
+
+Every architectural decision has a one-paragraph rationale in **`docs/DECISIONS.md`** (ADRs), and
+the exact acceptance criteria per milestone live in **`docs/MILESTONES.md`**.
 
 ## How this was built — the rules
 
