@@ -9,24 +9,16 @@ use kernova::println;
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
-    println!("Kernova: a kernel born like a new star");
-
-    #[cfg(test)]
     test_main();
-
     loop {}
 }
 
-/// Prints the panic message + location to the VGA buffer, then spins.
-#[cfg(not(test))]
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    println!("{}", info);
-    loop {}
-}
-
-#[cfg(test)]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     kernova::test_panic_handler(info)
+}
+
+#[test_case]
+fn test_println() {
+    println!("test_println output");
 }
